@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "volta": {
+    "node": "23.9.0"
+  },
   "scripts": {
+    "gen": "node script/generate_test_data.js",
+    "prepare": "node script/prepare_input.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
