@@ -12,3 +12,12 @@ docs/
 
 # Dotenv file
 .env
+
+/build/
+/node_modules
+/dist
+/coverage
+/coverage-final.json
+/nyc_output
+/.nyc_output
+/.cache
