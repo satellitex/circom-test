@@ -1,85 +1,295 @@
 pragma circom 2.0.0;
 
-// circomlib の必要な回路をインクルード
-include "node_modules/circomlib/circuits/poseidon.circom";
-include "node_modules/circomlib/circuits/eddsaposeidon.circom";
-include "node_modules/circomlib/circuits/smt/smtverifier.circom";
+// -------------------------------------------------------------
+// 必要なライブラリをインポート（ユーザ指定のもの）
+// -------------------------------------------------------------
+include "node_modules/circomlib/circuits/poseidon.circom";           // Poseidon
+include "node_modules/circomlib/circuits/eddsaposeidon.circom";     // EdDSA(Ed25519) + Poseidon
+include "node_modules/keccak-circom/circuits/keccak.circom";        // Keccak256
+include "node_modules/circomlib/circuits/smt/smtverifier.circom";    // Sparse Merkle Tree (SMT)証明
+include "node_modules/circomlib/circuits/comparators.circom";        // 比較器等
+include "node_modules/circomlib/circuits/bitify.circom";            // Num2Bits等のビット変換
+include "merkle.circom";
 
-// OneTimeNoteProof テンプレート：
-// ワンタイムノートの nullifier、ノート自体の正当性、署名検証、および SMT での非包含証明を実装
-template OneTimeNoteProof(nLevels) {
 
-    // --- 入力信号 ---
-    // ワンタイムノートの要素
-    signal input amount;                // ノートに含まれる金額（プライベート）
-    signal input encryptedReceiver;     // 暗号化された受取人アドレス（プライベート）
-    signal input rho;                   // ワンタイムノート用のランダム値（プライベート）
+// -------------------------------------------------------------
+// [サブテンプレート1] ConsumeNoteCircuit
+//   1つのノートを消費するときの処理:
+//   - Nullifier を計算
+//   - Sparse Merkle Tree で「未使用(非包含)」を証明
+//   - ワンタイムノートの Merkle Inclusion を証明
+//   - 金額を出力 (後で合計に使用)
+// -------------------------------------------------------------
+template ConsumeNoteCircuit(merkleDepth, smtDepth) {
+    // ---- 入力 (外部から与えられる) ----
+    signal input amount;             // ノート金額
+    signal input encryptedReceiver;  // 受取人情報(暗号化)
+    signal input rho;                // ランダム値
 
-    // SMT 検証用の入力
-    signal input pathIndices[nLevels];  // Sparse Merkle Tree 経路の各ビット（0 or 1）
-    signal input siblings[nLevels];     // SMT の兄弟ノードハッシュの配列
+    signal input rootNullifier;      // 使用済みノート(SMT)のルート
+    signal input smtSiblings[smtDepth];
+    signal input smtPathIndex[smtDepth];
 
-    // 署名検証用の入力
-    signal input Ax;  // 署名者の公開鍵（x座標）
-    signal input Ay;  // 署名者の公開鍵（y座標）
-    signal input R8x; // 署名の R8 の x座標
-    signal input R8y; // 署名の R8 の y座標
-    signal input S;   // 署名の S 値
+    signal input rootNote;           // ワンタイムノート(Merkle)のルート
+    signal input notePathElements[merkleDepth];
+    signal input notePathIndex[merkleDepth];
 
-    // --- 出力信号 ---
-    signal output nullifier;            // 計算された nullifier（公開としても利用可能）
-    signal output noteHash;             // ワンタイムノートのハッシュ
-    signal output smtRoot;              // SMT におけるルートハッシュ
-    signal output sigValid;             // 署名検証結果（1: 有効, 0: 無効）
+    // ---- 出力 ----
+    signal output outAmount;         // ノート金額 (合計計算用)
 
-    // --- 回路内部処理 ---
-    // 1. Poseidon を使って内部ハッシュを計算
-    // ノートハッシュ: noteHash = Poseidon([amount, encryptedReceiver, rho])
-    component poseidonNote = Poseidon(3);
-    poseidonNote.inputs[0] <== amount;
-    poseidonNote.inputs[1] <== encryptedReceiver;
-    poseidonNote.inputs[2] <== rho;
-    noteHash <== poseidonNote.out;
+    // (a) Nullifier を Poseidon で計算 (rhoを内部ハッシュしてもOK)
+    component rhoHash = Poseidon(1);
+    rhoHash.inputs[0] <== rho;
 
-    // 2. Nullifier の計算:
-    // 例として、nullifier = Poseidon([amount, encryptedReceiver, Poseidon([rho])])
-    component poseidonRho = Poseidon(1);
-    poseidonRho.inputs[0] <== rho;
-    component poseidonNullifier = Poseidon(3);
-    poseidonNullifier.inputs[0] <== amount;
-    poseidonNullifier.inputs[1] <== encryptedReceiver;
-    poseidonNullifier.inputs[2] <== poseidonRho.out;
-    nullifier <== poseidonNullifier.out;
+    component nullifierCalc = Poseidon(3);
+    nullifierCalc.inputs[0] <== amount;
+    nullifierCalc.inputs[1] <== encryptedReceiver;
+    nullifierCalc.inputs[2] <== rhoHash.out;
 
-    // 3. Sparse Merkle Tree による非包含証明
-    // SMTVerifier 回路により、nullifier が既存の使用済みノート集合に含まれていないことを証明
-    // ※ SMTVerifier テンプレートは、SMT のルートと入力経路から対象要素の存在/非存在を検証します。
-    component smtVerifier = SMTVerifier(nLevels);
-    // SMTVerifier の入力は対象要素（ここでは nullifier）と、経路情報
-    smtVerifier.leaf <== nullifier;
-    for (var i = 0; i < nLevels; i++) {
-        smtVerifier.pathIndices[i] <== pathIndices[i];
-        smtVerifier.siblings[i] <== siblings[i];
+    // ここでは Nullifier の値そのものは外に出さず、外部(メイン)で比較するときは
+    // "Nullifier[i]" を別途 public input にするなどの設計が考えられます。
+    // ただし本サブ回路では「Nullifier が rootNullifier に非包含であること」を証明します。
+
+    // (b) Sparse Merkle Tree での非包含証明 (「value=0」であると仮定)
+    // SMTVerifier は以下の入力を持つ:
+    // - enabled: 有効/無効
+    // - root: SMT ルートハッシュ
+    // - siblings[]: 兄弟ノード値
+    // - oldKey, oldValue: 古いキーとその値
+    // - isOld0: 古いキーが0かどうか
+    // - key, value: 検証するキーと値
+    // - fnc: 機能コード (0:包含検証, 1:非包含検証)
+    component smtVer = SMTVerifier(smtDepth);
+    smtVer.root <== rootNullifier;
+    smtVer.key <== nullifierCalc.out;
+    smtVer.value <== 0;
+    smtVer.oldKey <== 0;
+    smtVer.oldValue <== 0;
+    smtVer.isOld0 <== 1;
+    smtVer.fnc <== 1; // 1: VERIFY NOT INCLUSION
+    smtVer.enabled <== 1;  // 証明を有効化
+    for (var d = 0; d < smtDepth; d++) {
+        smtVer.siblings[d] <== smtSiblings[d];
+        // 注: 実際のSMTVerifierはpathIndicesシグナルを持たないが、
+        // 互換性のためsmtPathIndex入力は残している
     }
-    // SMT のルート（既に使用済みノートの集合のルート）を出力
-    smtRoot <== smtVerifier.root;
 
-    // 4. EdDSA Poseidon を使った署名検証
-    // 署名対象として noteHash を利用
-    component eddsa = EdDSAPoseidonVerifier();
-    eddsa.enabled <== 1;          // 署名検証を有効化
-    eddsa.Ax <== Ax;
-    eddsa.Ay <== Ay;
-    eddsa.R8x <== R8x;
-    eddsa.R8y <== R8y;
-    eddsa.S <== S;
-    eddsa.M <== noteHash;         // 署名の対象メッセージとしてノートハッシュを使用
-    // 署名が正しい場合、内部制約が成立し、回路は整合性を持つ
+    // (c) hashedOnetimeNote = Poseidon(amount, encryptedReceiver, rho) が
+    //     rootNote に含まれていること(= メルクル包含証明)。
+    component noteHash = Poseidon(3);
+    noteHash.inputs[0] <== amount;
+    noteHash.inputs[1] <== encryptedReceiver;
+    noteHash.inputs[2] <== rho;
 
-    // 出力: 署名が正しければ 1 を出力
-    // （この例では、署名検証に失敗した場合は回路全体が矛盾するため、sigValid は常に 1 となる）
-    sigValid <== 1;
+    // circomlib の Merkle Inclusion 回路がある場合は利用。
+    component noteMerkleCheck = VerifyMerklePath(merkleDepth);
+    noteMerkleCheck.leaf <== noteHash.out;
+    noteMerkleCheck.root <== rootNote;
+    for (var m = 0; m < merkleDepth; m++) {
+        noteMerkleCheck.pathElements[m] <== notePathElements[m];
+        noteMerkleCheck.pathIndices[m] <== notePathIndex[m];
+    }
+
+    // (d) 出力: このノートの金額
+    outAmount <== amount;
 }
 
-// メイン回路：MerkleProof に必要な SMT 経路長を例として 20 を使用
-component main = OneTimeNoteProof(20);
+// -------------------------------------------------------------
+// [サブテンプレート2] CreateNoteCircuit
+//   1つの新規ノートを作成し、ハッシュ (hashedOnetimeNote) を出力
+// -------------------------------------------------------------
+template CreateNoteCircuit() {
+    signal input amount;
+    signal input encryptedReceiver;
+    signal input rho;
+
+    // 新規ノートのハッシュを出力
+    signal output hashedNote;
+
+    // hashedNote = Poseidon(amount, encryptedReceiver, rho)
+    component noteHash = Poseidon(3);
+    noteHash.inputs[0] <== amount;
+    noteHash.inputs[1] <== encryptedReceiver;
+    noteHash.inputs[2] <== rho;
+    hashedNote <== noteHash.out;
+}
+
+// -------------------------------------------------------------
+// [メイン回路] MainCircuit
+//   - nIn 個の既存ノートを消費 (ConsumeNoteCircuit)
+//   - nOut 個の新規ノートを作成 (CreateNoteCircuit)
+//   - 送金額合計や署名検証などをまとめて実行
+// -------------------------------------------------------------
+template MainCircuit(nIn, nOut, merkleDepth, smtDepth) {
+    // ------------------------------------------------
+    // [Public Inputs] (公開入力)
+    // ------------------------------------------------
+    signal input rootNullifier;                    // SMTルート(使用済みノート)
+    signal input rootNote;                         // Merkleルート(ワンタイムノート)
+    signal input hashedSignature;                  // 署名のハッシュ
+    signal input Nullifier[nIn];                   // 各ノートのNullifier (比較用)
+    signal input hashedOnetimeNote_out[nOut];      // 新規ノートのハッシュ
+    signal input hashedAmount;                     // 送金額(合計)のハッシュ
+
+    // ------------------------------------------------
+    // [Private Inputs] (秘密入力)
+    // ------------------------------------------------
+    // 消費ノートに関する情報
+    signal input amount_in[nIn];
+    signal input encryptedReceiver_in[nIn];
+    signal input rho_in[nIn];
+
+    signal input note_pathElements[nIn][merkleDepth];
+    signal input note_pathIndex[nIn][merkleDepth];
+    signal input smt_siblings[nIn][smtDepth];
+    signal input smt_pathIndices[nIn][smtDepth];
+
+    // 新規ノートに関する情報
+    signal input amount_out[nOut];
+    signal input encryptedReceiver_out[nOut];
+    signal input rho_out[nOut];
+
+    // 署名(EdDSA Poseidon) 用の公開鍵・署名データ
+    signal input Ax;
+    signal input Ay;
+    signal input R8x;
+    signal input R8y;
+    signal input S;
+
+    // keccak 等の検証に用いる
+    signal input nddnPublicKey;
+    signal input rho2;  // hashedAmount 用の乱数
+
+    // ------------------------------------------------
+    // 1) 消費ノートの検証 → nIn 個
+    // ------------------------------------------------
+    // 合計金額を計算しながら、Nullifier と Merkle をチェック
+    var sumIn = 0;
+
+    // ConsumeNoteCircuit を nIn 個インスタンス化 (配列コンポーネント)
+    component consumeNotes[nIn];
+    for (var i = 0; i < nIn; i++) {
+        // サブテンプレートを呼び出し
+        consumeNotes[i] = ConsumeNoteCircuit(merkleDepth, smtDepth);
+
+        // 入力を配線
+        consumeNotes[i].amount <== amount_in[i];
+        consumeNotes[i].encryptedReceiver <== encryptedReceiver_in[i];
+        consumeNotes[i].rho <== rho_in[i];
+
+        consumeNotes[i].rootNullifier <== rootNullifier;
+        for (var d = 0; d < smtDepth; d++) {
+            consumeNotes[i].smtSiblings[d] <== smt_siblings[i][d];
+            consumeNotes[i].smtPathIndex[d] <== smt_pathIndices[i][d];
+        }
+
+        consumeNotes[i].rootNote <== rootNote;
+        for (var md = 0; md < merkleDepth; md++) {
+            consumeNotes[i].notePathElements[md] <== note_pathElements[i][md];
+            consumeNotes[i].notePathIndex[md] <== note_pathIndex[i][md];
+        }
+
+        // Nullifier[i] とサブテンプレートで計算した nullifierCalc.out を比較したいなら
+        // サブテンプレートで出力してもよいが、ここでは省略 or
+        // "Nullifier[i] === ...?" の制約をサブテンプレートに含める等、設計次第
+
+        // 合計金額を加算
+        sumIn += consumeNotes[i].outAmount;
+    }
+
+    // ------------------------------------------------
+    // 2) 新規ノートの検証 → nOut 個
+    // ------------------------------------------------
+    var sumOut = 0;
+
+    // CreateNoteCircuit を nOut 個インスタンス化
+    component createNotes[nOut];
+    for (var j = 0; j < nOut; j++) {
+        createNotes[j] = CreateNoteCircuit();
+
+        // 入力を配線
+        createNotes[j].amount <== amount_out[j];
+        createNotes[j].encryptedReceiver <== encryptedReceiver_out[j];
+        createNotes[j].rho <== rho_out[j];
+
+        // 出力 hashedNote と hashedOnetimeNote_out[j] を比較
+        hashedOnetimeNote_out[j] === createNotes[j].hashedNote;
+
+        // 合計を加算
+        sumOut += amount_out[j];
+    }
+
+    // ------------------------------------------------
+    // 3) 金額合計 (sumIn === sumOut)
+    // ------------------------------------------------
+    sumIn === sumOut;
+
+    // ------------------------------------------------
+    // 4) hashedAmount = Poseidon(sumIn, rho2)
+    // ------------------------------------------------
+    component amountHash = Poseidon(2);
+    amountHash.inputs[0] <== sumIn;
+    amountHash.inputs[1] <== rho2;
+    amountHash.out === hashedAmount;
+
+    // ------------------------------------------------
+    // 5) 署名検証 (EdDSA Poseidon)
+    // ------------------------------------------------
+    // ここで メッセージを計算
+    component msgHash = Poseidon(2);
+    msgHash.inputs[0] <== encryptedReceiver_in[0];
+    msgHash.inputs[1] <== rho_in[0];
+
+    // circomlib/eddsaposeidon.circom の回路名に合わせて修正
+    component eddsaCheck = EdDSAPoseidonVerifier();
+    eddsaCheck.enabled <== 1; // 必須のenabled入力パラメータを追加
+    eddsaCheck.Ax <== Ax;
+    eddsaCheck.Ay <== Ay;
+    eddsaCheck.R8x <== R8x;
+    eddsaCheck.R8y <== R8y;
+    eddsaCheck.S <== S;
+    eddsaCheck.M <== msgHash.out;
+
+    // hashedSignature との比較
+    component sigDataHash = Poseidon(3);
+    sigDataHash.inputs[0] <== R8x;
+    sigDataHash.inputs[1] <== R8y;
+    sigDataHash.inputs[2] <== S;
+    sigDataHash.out === hashedSignature;
+
+    // ------------------------------------------------
+    // 6) keccak_256(publicKey)[-20:] == nddnPublicKey
+    // ------------------------------------------------
+    // 公開鍵 (Ax, Ay) をビット配列に変換
+    // 注: EdDSA公開鍵は X, Y 座標のペアなので、連結して入力とする
+    component pkToBitsX = Num2Bits(254); // 254ビットに制限（Poseidonの制約）
+    component pkToBitsY = Num2Bits(254);
+    pkToBitsX.in <== Ax;
+    pkToBitsY.in <== Ay;
+    
+    // 公開鍵のビット配列（X||Y）を作成 - 合計 508 ビット
+    var pkBits[508];
+    for (var i = 0; i < 254; i++) {
+        pkBits[i] = pkToBitsX.out[i];
+        pkBits[254+i] = pkToBitsY.out[i];
+    }
+    
+    // keccak-256 ハッシュを計算
+    component pkHash = Keccak(508, 256); // 入力508ビット、出力256ビット
+    for (var i = 0; i < 508; i++) {
+        pkHash.in[i] <== pkBits[i];
+    }
+    
+    // ハッシュの最後の160ビット（20バイト）を抽出
+    // nddnPublicKey も160ビットに変換
+    component nddnPkToBits = Num2Bits(160);
+    nddnPkToBits.in <== nddnPublicKey;
+    
+    // 最後の160ビットを比較
+    for (var i = 0; i < 160; i++) {
+        pkHash.out[256 - 160 + i] === nddnPkToBits.out[i];
+    }
+}
+
+// メイン回路のインスタンス
+component main = MainCircuit(2, 2, 20, 160);

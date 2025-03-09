@@ -79,6 +79,11 @@ cargo install --path circom
 ```
 
 ## Install snrakjs
-```
+```sh
 npm install -g snarkjs
+```
+
+## Build
+```sh
+circom circuits/onetime_note.circom --r1cs --wasm --sym -l . -o build
 ```

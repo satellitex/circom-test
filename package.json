@@ -12,6 +12,7 @@
   "dependencies": {
     "circomlib": "^2.0.5",
     "circomlibjs": "^0.1.7",
+    "keccak-circom": "github:vocdoni/keccak256-circom",
     "snarkjs": "^0.7.5"
   }
 }

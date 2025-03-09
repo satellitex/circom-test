@@ -14,6 +14,9 @@ importers:
       circomlibjs:
         specifier: ^0.1.7
         version: 0.1.7
+      keccak-circom:
+        specifier: github:vocdoni/keccak256-circom
+        version: https://codeload.github.com/vocdoni/keccak256-circom/tar.gz/af3e89816b46366e3fb9ff551be819357637f09b
       snarkjs:
         specifier: ^0.7.5
         version: 0.7.5
@@ -276,6 +279,10 @@ packages:
 
   jsonpath@1.1.1:
     resolution: {integrity: sha512-l6Cg7jRpixfbgoWgkrl77dgEj8RPvND0wMH6TwQmi9Qs4TFfS9u5cUFnbeKTwj5ga5Y3BTGGNI28k117LJ009w==}
+
+  keccak-circom@https://codeload.github.com/vocdoni/keccak256-circom/tar.gz/af3e89816b46366e3fb9ff551be819357637f09b:
+    resolution: {tarball: https://codeload.github.com/vocdoni/keccak256-circom/tar.gz/af3e89816b46366e3fb9ff551be819357637f09b}
+    version: 0.0.1
 
   levn@0.3.0:
     resolution: {integrity: sha512-0OO4y2iOHix2W6ujICbKIaEQXvFQHue65vUG3pb5EUomzPI90z9hsA1VsO/dbIIpC53J8gxM9Q4Oho0jrCM/yA==}
@@ -860,6 +867,10 @@ snapshots:
       esprima: 1.2.2
       static-eval: 2.0.2
       underscore: 1.12.1
+
+  keccak-circom@https://codeload.github.com/vocdoni/keccak256-circom/tar.gz/af3e89816b46366e3fb9ff551be819357637f09b:
+    dependencies:
+      circomlib: 2.0.5
 
   levn@0.3.0:
     dependencies:
