@@ -112,23 +112,17 @@ circom circuits/onetime_note.circom --r1cs --wasm --sym -l . -l node_modules -o 
 4. **証明の生成と検証**
    ```sh
    # 証明鍵の生成（テスト用、実運用環境では信頼できるセットアップが必要）
-   cd build/onetime_note_js
-   npx snarkjs powersoftau new bn128 18 pot18_0000.ptau -v
-   npx snarkjs powersoftau contribute pot18_0000.ptau pot18_0001.ptau --name="First contribution" -v
-   npx snarkjs powersoftau prepare phase2 pot18_0001.ptau pot18_final.ptau -v
-   npx snarkjs groth16 setup ../onetime_note.r1cs pot18_final.ptau onetime_note_0000.zkey
-   npx snarkjs zkey contribute onetime_note_0000.zkey onetime_note_0001.zkey --name="Second contribution" -v
-   npx snarkjs zkey export verificationkey onetime_note_0001.zkey verification_key.json
+   pnpm run setup-keys
    
    # 証明の生成
    # 最初にwitness（回路の実行証跡）を計算
-   node generate_witness.js onetime_note.wasm input.json witness.wtns
+   pnpm run generate-witness
    
    # 次に証明を生成
-   npx snarkjs groth16 prove onetime_note_0001.zkey witness.wtns proof.json public.json
+   pnpm run generate-proof
    
    # 証明の検証
-   npx snarkjs groth16 verify verification_key.json public.json proof.json
+   pnpm verify-proof
    ```
 
 5. **結果の解釈**
