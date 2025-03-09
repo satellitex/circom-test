@@ -64,3 +64,21 @@ $ forge --help
 $ anvil --help
 $ cast --help
 ```
+
+
+# Circom
+
+[https://docs.circom.io/getting-started/installation/](https://docs.circom.io/getting-started/installation/)
+
+## Install
+```sh
+git clone https://github.com/iden3/circom.git
+cd circom
+cargo build --release
+cargo install --path circom
+```
+
+## Install snrakjs
+```
+npm install -g snarkjs
+```
