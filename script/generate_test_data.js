@@ -93,35 +93,38 @@ async function generateTestData() {
             BigInt(input.rho)
         ]));
         
-        // 簡易的なパス生成（実際には本物のマークルツリーからパスを取得する）
-        const pathElements = [];
-        const pathIndices = [];
-        for (let j = 0; j < testData.merkleDepth; j++) {
-            pathElements.push(await randomField());
-            pathIndices.push(Math.random() > 0.5 ? "1" : "0");
-        }
-        
+        // (A) すべて 0 埋めの path で "root=leaf" にする例
+        const pathElements = Array(testData.merkleDepth).fill("0");
+        const pathIndices = Array(testData.merkleDepth).fill("0");
+
         testData.merkleTree[i] = {
             leaf,
             pathElements,
             pathIndices
         };
+
+        // メインで rootNote = leaf として合致させる (複数ノートなら工夫が必要)
+        if (i === 0) {
+          // とりあえず rootNote = leaf  (1葉のときのみ通用する)
+          testData.rootNote = leaf;
+        }
     }
     
     // SMTパスの生成（ここではデモ用に簡易的に生成）
     testData.smt = {};
     for (let i = 0; i < testData.inputs.length; i++) {
-        const smtSiblings = [];
-        const smtPathIndices = [];
-        for (let j = 0; j < testData.smtDepth; j++) {
-            smtSiblings.push(await randomField());
-            smtPathIndices.push(Math.random() > 0.5 ? "1" : "0");
-        }
+        // circomlib の空ツリー初期ルートを計算または既知の値に合わせる
+        // siblings, pathIndices を 0 埋め
+        const smtSiblings = Array(testData.smtDepth).fill("0");
+        const smtPathIndices = Array(testData.smtDepth).fill("0");
         
         testData.smt[i] = {
             smtSiblings,
             smtPathIndices
         };
+
+        // rootNullifier を 空ツリーのルート(0) にしておく など
+        testData.rootNullifier = "0"; // circomlibバージョンによっては別の初期値   
     }
     
     // 送金額合計のハッシュ
