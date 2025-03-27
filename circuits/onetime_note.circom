@@ -9,9 +9,6 @@ include "node_modules/keccak-circom/circuits/keccak.circom";        // Keccak256
 include "node_modules/circomlib/circuits/smt/smtverifier.circom";    // Sparse Merkle Tree (SMT)証明
 include "node_modules/circomlib/circuits/comparators.circom";        // 比較器等
 include "node_modules/circomlib/circuits/bitify.circom";            // Num2Bits等のビット変換
-include "merkle.circom";
-
-
 // -------------------------------------------------------------
 // [サブテンプレート1] ConsumeNoteCircuit
 //   1つのノートを消費するときの処理:
@@ -29,10 +26,14 @@ template ConsumeNoteCircuit(merkleDepth, smtDepth) {
     signal input rootNullifier;      // 使用済みノート(SMT)のルート
     signal input smtSiblings[smtDepth];
     signal input smtPathIndex[smtDepth];
+    signal input oldKey;             // 非包含証明用の古いキー
+    signal input oldValue;           // 非包含証明用の古いキーの値
+    signal input isOld0;             // 古いキーが0かどうか
 
-    signal input rootNote;           // ワンタイムノート(Merkle)のルート
+    signal input rootNote;           // ワンタイムノート(SMT)のルート
     signal input notePathElements[merkleDepth];
     signal input notePathIndex[merkleDepth];
+    signal input noteValue;          // ノートの値 (SMT用)
 
     // ---- 出力 ----
     signal output outAmount;         // ノート金額 (合計計算用)
@@ -63,9 +64,9 @@ template ConsumeNoteCircuit(merkleDepth, smtDepth) {
     smtVer.root <== rootNullifier;
     smtVer.key <== nullifierCalc.out;
     smtVer.value <== 0;
-    smtVer.oldKey <== 0;
-    smtVer.oldValue <== 0;
-    smtVer.isOld0 <== 1;
+    smtVer.oldKey <== oldKey;
+    smtVer.oldValue <== oldValue;
+    smtVer.isOld0 <== isOld0;
     smtVer.fnc <== 1; // 1: VERIFY NOT INCLUSION
     smtVer.enabled <== 1;  // 証明を有効化
     for (var d = 0; d < smtDepth; d++) {
@@ -75,19 +76,29 @@ template ConsumeNoteCircuit(merkleDepth, smtDepth) {
     }
 
     // (c) hashedOnetimeNote = Poseidon(amount, encryptedReceiver, rho) が
-    //     rootNote に含まれていること(= メルクル包含証明)。
+    //     rootNote に含まれていること(= SMTによる包含証明)。
     component noteHash = Poseidon(3);
     noteHash.inputs[0] <== amount;
     noteHash.inputs[1] <== encryptedReceiver;
     noteHash.inputs[2] <== rho;
 
-    // circomlib の Merkle Inclusion 回路がある場合は利用。
-    component noteMerkleCheck = VerifyMerklePath(merkleDepth);
-    noteMerkleCheck.leaf <== noteHash.out;
-    noteMerkleCheck.root <== rootNote;
+    // SMTVerifierを使用してノートの包含証明を行う
+    component noteSMTCheck = SMTVerifier(merkleDepth);
+    noteSMTCheck.root <== rootNote;
+    noteSMTCheck.key <== noteHash.out;  // ノートのハッシュをキーとして使用
+    noteSMTCheck.value <== noteValue;   // 存在を証明する値 (通常は1)
+    noteSMTCheck.fnc <== 0;             // 0: VERIFY INCLUSION
+    noteSMTCheck.enabled <== 1;         // 有効化
+    
+    // 包含証明の場合、oldKey/oldValueは使用しないが、SMTVerifierの仕様上必要
+    noteSMTCheck.oldKey <== 0;
+    noteSMTCheck.oldValue <== 0;
+    noteSMTCheck.isOld0 <== 1;
+    
     for (var m = 0; m < merkleDepth; m++) {
-        noteMerkleCheck.pathElements[m] <== notePathElements[m];
-        noteMerkleCheck.pathIndices[m] <== notePathIndex[m];
+        noteSMTCheck.siblings[m] <== notePathElements[m];
+        // SMTVerifierは内部でpathIndicesを使用しないが
+        // 互換性のためnotePathIndex入力は残している
     }
 
     // (d) 出力: このノートの金額
@@ -141,8 +152,12 @@ template MainCircuit(nIn, nOut, merkleDepth, smtDepth) {
 
     signal input note_pathElements[nIn][merkleDepth];
     signal input note_pathIndex[nIn][merkleDepth];
+    signal input note_value[nIn];                  // ノートの値 (SMT用)
     signal input smt_siblings[nIn][smtDepth];
     signal input smt_pathIndices[nIn][smtDepth];
+    signal input smt_oldKey[nIn];
+    signal input smt_oldValue[nIn];
+    signal input smt_isOld0[nIn];
 
     // 新規ノートに関する情報
     signal input amount_out[nOut];
@@ -178,12 +193,16 @@ template MainCircuit(nIn, nOut, merkleDepth, smtDepth) {
         consumeNotes[i].rho <== rho_in[i];
 
         consumeNotes[i].rootNullifier <== rootNullifier;
+        consumeNotes[i].oldKey <== smt_oldKey[i];
+        consumeNotes[i].oldValue <== smt_oldValue[i];
+        consumeNotes[i].isOld0 <== smt_isOld0[i];
         for (var d = 0; d < smtDepth; d++) {
             consumeNotes[i].smtSiblings[d] <== smt_siblings[i][d];
             consumeNotes[i].smtPathIndex[d] <== smt_pathIndices[i][d];
         }
 
         consumeNotes[i].rootNote <== rootNote;
+        consumeNotes[i].noteValue <== note_value[i];
         for (var md = 0; md < merkleDepth; md++) {
             consumeNotes[i].notePathElements[md] <== note_pathElements[i][md];
             consumeNotes[i].notePathIndex[md] <== note_pathIndex[i][md];
