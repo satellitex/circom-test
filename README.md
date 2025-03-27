@@ -104,11 +104,6 @@ circom circuits/onetime_note.circom --r1cs --wasm --sym -l . -l node_modules -o 
    pnpm run gen
    ```
 
-3. **入力ファイルの準備**
-   ```sh
-   pnpm run prepare
-   ```
-
 4. **証明の生成と検証**
    ```sh
    # 証明鍵の生成（テスト用、実運用環境では信頼できるセットアップが必要）
