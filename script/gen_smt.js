@@ -84,7 +84,7 @@ async function main() {
   
   // Create the inclusion input - start with enabled=0 to make it pass verification
   const inclusionInput = {
-    enabled: 0, // Disable verification for now to ensure it passes
+    enabled: 1, // Disable verification for now to ensure it passes
     root: F.toString(root),
     siblings: inclusionSiblings,
     oldKey: "0", // Not used for inclusion
@@ -97,7 +97,7 @@ async function main() {
   
   // Create the non-inclusion input - start with enabled=0 to make it pass verification
   const nonInclusionInput = {
-    enabled: 0, // Disable verification for now to ensure it passes
+    enabled: 1, // Disable verification for now to ensure it passes
     root: F.toString(root),
     siblings: nonInclusionSiblings,
     oldKey: oldKey,
