@@ -11,12 +11,12 @@ contract DeployVerifierScript is Script {
 
     function run() public {
         console.log("Deploying Groth16Verifier contract...");
-        
+
         vm.startBroadcast();
-        
+
         verifier = new Groth16Verifier();
         console.log("Groth16Verifier deployed at:", address(verifier));
-        
+
         vm.stopBroadcast();
     }
 }
