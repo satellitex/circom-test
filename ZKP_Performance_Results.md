@@ -136,6 +136,53 @@ pnpm run verify-proof  0.83s user 0.14s system 131% cpu 0.735 total
 - より効率的なハッシュ関数や制約の最適化による計算量削減
 - より高速なzk-SNARKライブラリの採用検討
 
+## テストネット検証結果
+
+### コントラクトビルドサイズ
+
+| コントラクト | ランタイムサイズ (B) | イニットコードサイズ (B) | ランタイム余裕 (B) | イニットコード余裕 (B) |
+|------------|-------------------|----------------------|-----------------|-------------------|
+| Groth16Verifier | 2,001 | 2,030 | 22,575 | 47,122 |
+
+### Deployed contract
+| 項目 | 詳細 |
+|------|------|
+| **コントラクト概要** | |
+| 名称 | Groth16Verifier | 
+| ネットワーク | Sepoliaテストネット |
+| 作成トランザクション | 0x331fcc292320cc7f375573e03842c06f804f586f7c60e08f96b24da37226c416 |
+| コントラクトアドレス | 0xEc3213b7690AC84aa0e1d95f7344d49A2085d32F |
+| **ソースコード情報** | |
+| コンパイラバージョン | v0.8.20+commit.a1b79de6 |
+| 最適化設定 | 有効（200回のラン） |
+| EVMバージョン | Shanghai |
+| ライセンス | GPL-3.0 |
+
+
+
+
+### 検証
+
+| 項目 | 詳細 |
+|------|------|
+| 検証コントラクト | Groth16Verifier |
+| コントラクトアドレス | 0xEc3213b7690AC84aa0e1d95f7344d49A2085d32F |
+| 検証結果 | 成功 (true) |
+| 実行時間 | 0.08秒 |
+| CPU使用率 | 26% |
+
+```
+➜  verify-onetime git:(feat/verifier-sol) ✗ time forge script script/VerifyProof.s.sol --rpc-url $SEPOLIA_RPC_URL
+[⠊] Compiling...
+No files changed, compilation skipped
+Script ran successfully.
+
+== Logs ==
+  Using deployed Groth16Verifier at: 0xEc3213b7690AC84aa0e1d95f7344d49A2085d32F
+  Proof verification result: true
+forge script script/VerifyProof.s.sol --rpc-url $SEPOLIA_RPC_URL  0.83s user 0.08s system 26% cpu 3.517 total
+```
+
 ## まとめ
 
 このZKPシステムは、ワンタイムノートの作成と消費を通じて、トランザクションのプライバシーを保護しながら金額の整合性と署名の正当性を保証します。性能測定結果から、プルーフ生成に若干の時間がかかるものの、検証は非常に高速であることが確認されました。これはZKPの特性を活かした実用的な実装と言えます。
